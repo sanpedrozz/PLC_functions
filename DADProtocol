@@ -1,0 +1,461 @@
+FUNCTION_BLOCK "DADProtocol"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      DAD_ENABLE : Bool;
+      IOconditioning_Enable : Bool;
+      DataConsistency_Enable : Bool;
+      OutputExArea_FirstByteAddress : Int;
+      OutputExArea_Size : Int;
+      InputExArea_FirstByteAddress : Int;
+      InputExArea_Size : Int;
+   END_VAR
+
+   VAR_OUTPUT 
+      newDataBlockReceived : Bool;
+      newDataBlockLength : Int;
+   END_VAR
+
+   VAR_IN_OUT 
+      Do_Resync : Bool;
+      Do_SendData : Bool;
+      DataToSendLength : Byte;
+   END_VAR
+
+   VAR 
+      newInputDataAvailable : Bool;
+      InputExArea_Type : Byte := 16#81;
+      OutputExArea_Type : Byte := 16#82;
+      DB_Number : DInt;
+      inputBuffer : Array[0..512] of Byte;
+      outputBuffer : Array[0..512] of Byte;
+      DAD_PRTL_FIRST_ITERATION : Bool := true;
+      DAD_InternalStates : Int;
+      AddressOffset : Int;
+      InputDataLenByteAddress : Int;
+      InputControlByteAddress : Int;
+      InputFirstDataByteAddress : Int;
+      InputDataConistencyByteAddress : Int;
+      InputDataByteAddress : Int;
+      InputDataAvailable_Actual : Bool;
+      InputFragmentedData_Actual : Bool;
+      InputFragmentedData_Previous : Bool;
+      InputDeviceDadEnable : Bool;
+      InputResyncAck : Bool;
+      InputControlByte : Byte;
+      InputDataLength : Byte;
+      InputDataConsistencyByte : Byte;
+      DataByteIndex : Int;
+      OutputControlByteAddress : Int;
+      OutputControlByte : Byte;
+      OutputDataConsistencyByteAddress : Int;
+      OutputAckDataReceived : Bool;
+      TempByteValue : Byte;
+      BufferDataByteIndex : Int;
+      BeginFragmentedDataRx : Bool;
+      EndFragmentedDataRx : Bool;
+      FragmentedDataRxEnable : Bool;
+      DataFragmentIndex : Int;
+      MaxInputFragmentDimension : Int;
+      DAD_PRTL_NUM_BYTE { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+      IO_COND_NUM_BYTE { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+      DATA_CONSISTENCY_NUM_BYTE { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Int;
+      Error_INPUT_DATA_CONSISTENCY : Bool;
+      Error_DAD_DISABLED_ON_DEVICE : Bool;
+      OutputDataLenByteAddress : Int;
+      OutputFirstDataByteAddress : Int;
+      NewMessageReady : Bool;
+      ackDataReceived : Bool;
+   END_VAR
+
+   VAR_TEMP 
+      MessageByteIndex : Int;
+      resetByte : Byte;
+   END_VAR
+
+   VAR CONSTANT 
+      IDLE : Int := 0;
+      WAIT_DEVICE_DAD_ENABLING : Int := 1;
+      CHECK_DATA_CONSISTENCY : Int := 10;
+      READ_DATA : Int := 20;
+      SEND_DATA : Int := 40;
+      WAIT_ACK_DATA_SENT : Int := 41;
+      SEND_SYNC_REQUEST : Int := 30;
+      WAIT_SYNC_ACK : Int := 31;
+      SEND_END_SYNC_REQUEST : Int := 32;
+      WAIT_END_SYNC_ACK : Int := 33;
+   END_VAR
+
+
+BEGIN
+	IF #DAD_ENABLE THEN
+	    // IF THE DAD PROTOCOL IS ENABLED..
+	    
+	    IF #DAD_PRTL_FIRST_ITERATION THEN
+	        
+	        // ONLY DURING THE FIRST ITERATION AFTER DAD PROTOCOL ENABLING...
+	        
+	        (*------------------------------------------------------------------------------
+	        ********************* PROTOCOL INITIALIZATION PHASE ****************************
+	        --------------------------------------------------------------------------------
+	        
+	        The Protocol initializes its parameters AND sets the Bit 7 of the Output Control
+	        Byte.
+	        
+	        ================================================================================
+	        Depending on the configuration parameters the addresses of the Protocol Bytes 
+	        varies. Suppose an Exchange Area of N Bytes. If DAD, I/O condtioning, and Data
+	        Consistency are enabled then the position of the bytes inside the data frame 
+	        will be the following.
+	        
+	            BYTEs POSITIONs     BYTEs Desriptions  
+	            
+	        |         0         | I/0 Conditioning      |
+	        |         1         | DAD CTRL Byte         |
+	        |         2         | DAD SAP Byte          |
+	        |         3         | DAD LENGTH Byte       |
+	        |      4 -> N-2     | DATA                  |
+	        |        N-1        | DATA CONSISTENCY Byte |
+	        
+	        ================================================================================*)
+	        
+	        #DAD_PRTL_NUM_BYTE              := 3;
+	        
+	        IF #IOconditioning_Enable THEN
+	            // If I/O conditioning is actiated the I/O data is shifted forward by one byte
+	            #IO_COND_NUM_BYTE           := 1;
+	        END_IF;
+	        
+	        IF #DataConsistency_Enable THEN
+	            // If I/O conditioning is actiated the last Byte of the Exchange area will
+	            // contain the copy of the DAD Control Byte
+	            #DATA_CONSISTENCY_NUM_BYTE          := 1;
+	            #InputDataConistencyByteAddress     := #InputExArea_FirstByteAddress + #InputExArea_Size - 1;
+	            #OutputDataConsistencyByteAddress   := #OutputExArea_FirstByteAddress + #OutputExArea_Size - 1;
+	        END_IF;
+	        
+	        // Effective dimension of the data which can be received
+	        #MaxInputFragmentDimension      := #InputExArea_Size - #IO_COND_NUM_BYTE - #DATA_CONSISTENCY_NUM_BYTE - #DAD_PRTL_NUM_BYTE;
+	        
+	        #InputControlByteAddress        := #InputExArea_FirstByteAddress + #IO_COND_NUM_BYTE;
+	        #InputDataLenByteAddress        := #InputExArea_FirstByteAddress + #IO_COND_NUM_BYTE + 2;
+	        #InputFirstDataByteAddress      := #InputExArea_FirstByteAddress + #IO_COND_NUM_BYTE + 3;
+	        #OutputControlByteAddress       := #OutputExArea_FirstByteAddress + #IO_COND_NUM_BYTE;
+	        #OutputDataLenByteAddress       := #OutputExArea_FirstByteAddress + #IO_COND_NUM_BYTE + 2;
+	        #OutputFirstDataByteAddress     := #OutputExArea_FirstByteAddress + #IO_COND_NUM_BYTE + 3;
+	        
+	        // DAD Output Bit Enable set to '1' by the protocol
+	        POKE_BOOL(area                  := #OutputExArea_Type,
+	                  byteOffset            := #OutputControlByteAddress,
+	                  bitOffset             := 7,
+	                  dbNumber              := #DB_Number,
+	                  value                 := TRUE);
+	        
+	        #newDataBlockReceived           := FALSE;
+	        #newDataBlockLength             := 0;
+	        
+	        #DAD_PRTL_FIRST_ITERATION       := FALSE;
+	        
+	        // !!! After enabling the DAD, the PLC performs a resynchronization with the device !!!
+	        #DAD_InternalStates             := #SEND_SYNC_REQUEST;
+	        
+	    ELSE
+	        
+	        // IF IT'S NOT THE FIRST ITERATION AFTER DAD PROTOCOL ENABLING....
+	        
+	        (* =================================================================================
+	        ------------------------------------------------------------------------------------
+	        
+	        1st Operation.                INPUT/OUTPUT SAMPLING 
+	        
+	        ----------------------------------------------------------------------------------
+	        ==================================================================================*)
+	        
+	        // Storing the Actual Values of the INPUT CONTROL BYTE's BITS OF INTEREST  
+	        
+	        #InputControlByte               := PEEK_BYTE(area := #InputExArea_Type, byteOffset := #InputControlByteAddress, dbNumber := #DB_Number);
+	        #InputDataAvailable_Actual      := #InputControlByte.%X0;
+	        #InputResyncAck                 := #InputControlByte.%X2;
+	        #InputFragmentedData_Actual     := #InputControlByte.%X3;
+	        #InputDeviceDadEnable           := #InputControlByte.%X7;
+	        #InputDataConsistencyByte       := PEEK_BYTE(area := #InputExArea_Type, byteOffset := #InputDataConistencyByteAddress, dbNumber := #DB_Number);
+	        
+	        // Storing the Actual Values of the OUTPUT CONTROL BYTE's BITS OF INTEREST
+	        #OutputControlByte              := PEEK_BYTE(area := #OutputExArea_Type, byteOffset := #OutputControlByteAddress, dbNumber := #DB_Number);
+	        #OutputAckDataReceived          := #OutputControlByte.%X0;
+	        
+	        (*==================================================================================
+	        ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	        
+	        2nd Operation.           BEGIN DAD FINITE STATES MACHINE
+	        
+	        ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	        ==================================================================================*)
+	        
+	        CASE #DAD_InternalStates OF
+	                
+	                (* ------------------------------------------------------------------------------------------
+	                ********************************** PROTOCOL IDLE STATE **************************************
+	                ---------------------------------------------------------------------------------------------
+	                
+	                In the IDLE state the Protocol controls the input of the function block and the input control
+	                Byte to determin which procedure has to be done *)
+	                
+	            0: // IDLE
+	                
+	                // ========================= CHECK FOR NEW INPUT DATA =============================
+	                
+	                #newInputDataAvailable              := #InputDataAvailable_Actual <> #OutputAckDataReceived;
+	                
+	                IF #newInputDataAvailable THEN
+	                    // If a new Stream Of Data is available from the reader..
+	                    // Rising Edge of the Bit 3 in the Input CTRL Byte means Start Of FRAGMENTED Data Trasmission
+	                    #BeginFragmentedDataRx          := #InputFragmentedData_Actual AND NOT #InputFragmentedData_Previous;
+	                    // Falling Edge of the Bit 3 in the Input CTRL Byte means End Of FRAGMENTED Data Trasmission
+	                    #EndFragmentedDataRx            := NOT #InputFragmentedData_Actual AND #InputFragmentedData_Previous;
+	                    
+	                    IF #BeginFragmentedDataRx THEN
+	                        // If the Data is Fragmented the Protocol prepares for receiving each fragment
+	                        #FragmentedDataRxEnable     := TRUE;
+	                        #DataFragmentIndex          := 0;
+	                    END_IF;
+	                    
+	                    IF #DataConsistency_Enable THEN
+	                        
+	                        // Protocol Verifies the consistency and THEN read the data
+	                        IF #InputControlByte = #InputDataConsistencyByte THEN
+	                            #Error_INPUT_DATA_CONSISTENCY       := FALSE;
+	                            #DAD_InternalStates                 := #READ_DATA;
+	                        ELSE
+	                            #Error_INPUT_DATA_CONSISTENCY       := TRUE;
+	                            // #DAD_InternalStates                 := #CHECK_DATA_CONSISTENCY;
+	                        END_IF;
+	                        
+	                    ELSE
+	                        
+	                        // Protocol Reads the data
+	                        #DAD_InternalStates                     := #READ_DATA;
+	                        
+	                    END_IF;
+	                    
+	                END_IF;
+	                
+	                #InputFragmentedData_Previous := #InputFragmentedData_Actual;
+	                
+	                
+	                (*========================= USER ASKED FOR SENDING DATA ==========================
+	                   The Send Data procedure has higher priority than the reading data one
+	                *)
+	                
+	                IF #Do_SendData THEN
+	                    #DAD_InternalStates := #SEND_DATA;
+	                END_IF;
+	                
+	                
+	                
+	                (*=========================== USER ASKED FOR RESYNC ==============================
+	                   The Resynchronization procedure has higher priority than sending/reading data
+	                *)
+	                
+	                IF #Do_Resync THEN
+	                    #DAD_InternalStates                 := #SEND_SYNC_REQUEST;
+	                END_IF;
+	                
+	                (*=========================== DAD ON DEVICE IS OFF ===============================
+	                If the device is down the protocol waits for its recover (DAD Bit sets to 1) and
+	                automatically resync with it
+	                *)
+	                
+	                IF NOT #InputDeviceDadEnable THEN
+	                    #Error_DAD_DISABLED_ON_DEVICE       := TRUE;
+	                    #DAD_InternalStates                 := #WAIT_DEVICE_DAD_ENABLING;
+	                END_IF;
+	                
+	                
+	                (* --------------------------------------------------------------------------------------
+	                ************************* PROTOCOL WAITS FOR DEVICE RECOVER *****************************
+	                ----------------------------------------------------------------------------------------*)
+	                
+	            1: // WAIT_DEVICE_DAD_ENABLING
+	                
+	                IF #InputDeviceDadEnable THEN
+	                    #Error_DAD_DISABLED_ON_DEVICE       := FALSE;
+	                    #DAD_InternalStates                 := #SEND_SYNC_REQUEST;
+	                END_IF;
+	                
+	              
+	                (* --------------------------------------------------------------------------------------
+	                ******************************* PROTOCOL RECEIVES DATA ***********************************
+	                ----------------------------------------------------------------------------------------*)
+	                
+	            20: // READ_DATA
+	                
+	                #InputDataLength := PEEK_BYTE(area := #InputExArea_Type, byteOffset := #InputDataLenByteAddress, dbNumber := #DB_Number);
+	                
+	                FOR #DataByteIndex := 0 TO BYTE_TO_INT(#InputDataLength) - 1 DO
+	                    #InputDataByteAddress           := #InputFirstDataByteAddress + #DataByteIndex;
+	                    #TempByteValue                  := PEEK_BYTE(area := #InputExArea_Type, byteOffset := #InputDataByteAddress, dbNumber := #DB_Number);
+	                    #BufferDataByteIndex            := #DataByteIndex + (#MaxInputFragmentDimension * #DataFragmentIndex);
+	                    #inputBuffer[#BufferDataByteIndex] := #TempByteValue;
+	                END_FOR;
+	                
+	                IF #FragmentedDataRxEnable THEN
+	                    // If the Fragmentation is Enabled i prepare for reading the next fragment
+	                    #DataFragmentIndex := #DataFragmentIndex + 1;
+	                    
+	                    IF #EndFragmentedDataRx THEN
+	                        // If it has been received the last fragment the Protocol:
+	                        #newDataBlockReceived   := NOT #newDataBlockReceived;
+	                        #newDataBlockLength     := #BufferDataByteIndex + 1;
+	                        #FragmentedDataRxEnable := FALSE;       // Disable the Data Fragmentation Enable
+	                        #DataFragmentIndex      := 0;           // Reset the Data Fragment Index
+	                    END_IF;
+	                    
+	                ELSE
+	                    #newDataBlockReceived       := NOT #newDataBlockReceived;
+	                    #newDataBlockLength         := #BufferDataByteIndex + 1;
+	                END_IF;
+	                
+	                // SEND_ACKNOWLEDGE_DATA_READ
+	                
+	                POKE_BOOL(area          := #OutputExArea_Type,
+	                          byteOffset    := #OutputControlByteAddress,
+	                          bitOffset     := 0,
+	                          dbNumber      := #DB_Number,
+	                          value         := #InputDataAvailable_Actual); // DAD Protocol send the Ack
+	                
+	                #DAD_InternalStates     := #IDLE;
+	                
+	                (* --------------------------------------------------------------------------------------
+	                ************************* PROTOCOL RESYNCHRONIZES WITH DEVICE ***************************
+	                ---------------------------------------------------------------------------------------*)
+	                
+	            30: // SEND_SYNC_REQUEST
+	                
+	                POKE_BOOL(area          := #OutputExArea_Type,
+	                          byteOffset    := #OutputControlByteAddress,
+	                          bitOffset     := 2,
+	                          dbNumber      := #DB_Number,
+	                          value         := TRUE); // Protocol SET the Sync REQUEST
+	                
+	                #DAD_InternalStates     := #WAIT_SYNC_ACK;
+	                
+	            31: // WAIT_SYNC_ACK
+	                
+	                //Protocol Waits the Acknowledge from the Reader
+	                IF #InputResyncAck THEN
+	                    
+	                    POKE_BOOL(area          := #OutputExArea_Type,
+	                              byteOffset    := #OutputControlByteAddress,
+	                              bitOffset     := 1,
+	                              dbNumber      := #DB_Number,
+	                              value         := FALSE); // Protocol RESET the Output Data Ready Bit
+	                    
+	                    POKE_BOOL(area          := #OutputExArea_Type,
+	                              byteOffset    := #OutputControlByteAddress,
+	                              bitOffset     := 0,
+	                              dbNumber      := #DB_Number,
+	                              value         := FALSE); // Protocol RESET the Input Data Received Bit
+	                    
+	                    #DAD_InternalStates     := #SEND_END_SYNC_REQUEST;
+	                    
+	                END_IF;
+	                
+	            32: // SEND_END_SYNC_REQUEST
+	                
+	                POKE_BOOL(area              := #OutputExArea_Type,
+	                          byteOffset        := #OutputControlByteAddress,
+	                          bitOffset         := 2,
+	                          dbNumber          := #DB_Number,
+	                          value             := FALSE); // Protocol RESET the Sync REQUEST
+	                
+	                #DAD_InternalStates := #WAIT_END_SYNC_ACK;
+	                
+	            33: // WAIT_END_SYNC_ACK
+	                
+	                IF NOT #InputResyncAck THEN
+	                    #Do_Resync       := FALSE;           // Reset the Resync command, so that operation is executed just one time
+	                    #DAD_InternalStates     := #IDLE;
+	                END_IF;
+	                
+	                
+	                (* --------------------------------------------------------------------------------------
+	                ******************************** PROTOCOL SENDS DATA ************************************
+	                ----------------------------------------------------------------------------------------*)
+	                
+	            40: // SEND_DATA
+	                    
+	                POKE(area := #OutputExArea_Type,
+	                     byteOffset := #OutputDataLenByteAddress,
+	                     dbNumber := 0,
+	                     value := #DataToSendLength);
+	                
+	                FOR #MessageByteIndex := 0 TO BYTE_TO_INT(#DataToSendLength)-1 DO
+	                    POKE(area := #OutputExArea_Type,
+	                         byteOffset := #OutputFirstDataByteAddress + #MessageByteIndex,
+	                         dbNumber := 0,
+	                         value := #outputBuffer[#MessageByteIndex]);
+	                END_FOR;
+	                
+	                #NewMessageReady := NOT #NewMessageReady;
+	                
+	                POKE_BOOL(area := #OutputExArea_Type,
+	                          byteOffset := #OutputControlByteAddress,
+	                          bitOffset := 1,
+	                          dbNumber := 0,
+	                          value := #NewMessageReady);
+	                
+	                #DAD_InternalStates := 41;
+	                
+	            41: // WAIT_ACK_DATA_SENT
+	                
+	                #ackDataReceived := PEEK_BOOL(area := #InputExArea_Type, dbNumber := 0, byteOffset := #InputControlByteAddress, bitOffset := 1);
+	                
+	                IF #ackDataReceived = #NewMessageReady THEN
+	                    #Do_SendData := FALSE;
+	                    #DAD_InternalStates := #IDLE;
+	                END_IF;
+	                
+	                
+	                
+	        END_CASE;// END STATES MACHINE
+	        
+	        (*==================================================================================
+	        ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	        
+	                                   END DAD FINITE STATES MACHINE
+	        
+	        ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	        ==================================================================================*)
+	        
+	    END_IF;// END FIRST ITERATION IF
+	    
+	    IF #DataConsistency_Enable THEN
+	        // IF DATA CONSISTENCY IS ENBLED:
+	        // The DAD Protocol copies the DAD CTRL Byte to the last byte position in the Out Exchange area.
+	        #OutputControlByte      := PEEK_BYTE(area := #OutputExArea_Type, byteOffset := #OutputControlByteAddress, dbNumber := #DB_Number);
+	        POKE(area               := #OutputExArea_Type,
+	             byteOffset         := #OutputDataConsistencyByteAddress,
+	             dbNumber           := #DB_Number,
+	             value              := #OutputControlByte);
+	    END_IF;
+	    
+	ELSIF NOT #DAD_ENABLE & NOT #DAD_PRTL_FIRST_ITERATION THEN // IF THE DAD PROTOCOL IS DISABLED
+	    
+	    #resetByte              := 2#0000_0000;
+	    POKE(   area            := #OutputExArea_Type,
+	            byteOffset      := #OutputControlByteAddress,
+	            dbNumber        := #DB_Number,
+	            value           := #resetByte);
+	       
+	    #Do_Resync := FALSE;
+	    #Do_SendData := FALSE;
+	    #newDataBlockReceived := FALSE;
+	    #newDataBlockLength := 0;
+	       
+	    #DAD_PRTL_FIRST_ITERATION := TRUE;
+	       
+	END_IF;// END DAD ENABLE IF
+	
+END_FUNCTION_BLOCK
+
