@@ -1,0 +1,155 @@
+﻿FUNCTION_BLOCK "Shift_Math_Driver_v2"
+{ S7_Optimized_Access := 'TRUE' }
+VERSION : 0.1
+   VAR_INPUT 
+      in_CamEdge { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : "CamAxis";
+      in_CamCorner { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : "CamAxis";
+      in_rYfull { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      in_rXfull { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      in_rYShiftEdge { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      in_rYShiftCorner { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      in_rXShiftCorner { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+   END_VAR
+
+   VAR_OUTPUT 
+      out_diA { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt;
+      out_diX { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt;
+      out_diY { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : DInt;
+   END_VAR
+
+   VAR 
+      CamData { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Struct
+         rX1 { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rX2 { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rY2 { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      END_STRUCT;
+      CalcData { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Struct
+         rXBetweenCam { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rYBetweenCam { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rXDelta { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rYDelta { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rXCatet { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rYCatet { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      END_STRUCT;
+      A { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Struct
+         rTangens { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rRadian { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rDegree { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      END_STRUCT;
+      rX { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      rY { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+   END_VAR
+
+   VAR CONSTANT 
+      rXLen : Real := 2070.0;
+      rYLen : Real := 2800.0;
+   END_VAR
+
+
+BEGIN
+	(*
+	        
+	         ---+------------------------------------------------------------+ 
+	         ᐱ  |                                                            |
+	         |  |                                                            |
+	         |  |                                                            |
+	         |  |                                                            |
+	         |  |                                                            |
+	         |  |                                                            |
+	         |  |                                                            |
+	  rXfull |  |                                                            |
+	         |  |                                                            |
+	         |  |                                                            |
+	         |  |                           rYfull                           |
+	         |  |<---------------------------------------------------------->|--
+	         |  |                                                            | ᐱ
+	         |  |                                                            | |
+	         |  |                                                            | rXshiftCorner
+	         |  |                                                            | |
+	         ᐯ  |               |                          |                 | ᐯ
+	         ---+---------------|--------------------------|-----------------+--
+	            |<-rYshiftEdge->|<------rYBetweenCam------>|<-rYshiftCorner->|
+	                      
+	*)
+	
+	///////////////////////////////Расчет дополнительных переменных///////////////////////////////
+	#CalcData.rYBetweenCam := #rYLen - #in_rYShiftEdge - #in_rYShiftCorner;
+	#CalcData.rXDelta := ABS(#in_CamEdge.rX - #in_CamCorner.rX);
+	#CalcData.rXCatet := #rXLen/2;
+	#CalcData.rYCatet := #rYLen/2 - #in_rXShiftCorner;
+	//////////////////////////////////////////////////////////////////////////////////////////////
+	
+	
+	///////////////////////////////////////Расчет смещений////////////////////////////////////////
+	//Расчет смещения угла A
+	#A.rTangens := #CalcData.rXDelta / #CalcData.rYBetweenCam;  // Calculate Tangens Degree tn(A)
+	#A.rDegree := ATAN(#A.rTangens);                            // Calculate A in Degree
+	#A.rRadian := #A.rDegree * "rPi" / 180;                     // Calculate A in Radian
+	
+	//Расчет смещения Х
+	#rX := (#in_CamEdge.rX + #in_CamCorner.rX -  TAN(#A.rDegree) * #CalcData.rYCatet) / 2;
+	
+	
+	//#rX := (#in_CamCorner.rX + #in_CamEdge.rX -) / 2;
+	//Расчет смещения Y
+	#rY := #in_CamEdge.rY - TAN(#A.rDegree) * #CalcData.rYCatet;
+	//////////////////////////////////////////////////////////////////////////////////////////////
+	
+	///////////////////////////Применение min|max к расчетным значениям///////////////////////////
+	#A.rDegree := LIMIT(MN := 2, IN := #A.rDegree, MX := 2);    // Limit Angle
+	
+	//////////////////////////////////////////////////////////////////////////////////////////////
+	
+	
+	//////////////////////////////////////Доп. Преобразование/////////////////////////////////////
+	#A.rDegree := #A.rDegree * 100;                             // Multiply by 100
+	//////////////////////////////////////////////////////////////////////////////////////////////
+	
+	
+	//////////////////////////////////////Доп. Преобразование/////////////////////////////////////
+	
+	//////////////////////////////////////////////////////////////////////////////////////////////
+	
+	(*
+	//Если нулевые значения координат, то принимать значение 0.01
+	#r := SQRT(SQR(#in_xl) + SQR(#in_yl)) / 2;
+	#p := (#in_yl / 2 - #in_y0_1) / (#in_yl / 2 - #in_y0_2);
+	#x0 := (#x1 * #p + #x2) / 2;
+	
+	#s := SQRT(SQR(#in_xl / 2) + SQR(#in_yl / 2 - #in_y0_2));
+	
+	//Смещениен по X
+	#x := (#x1 - #s * TAN(#alpha_rad * 1.2) + #x2) / 2;
+	#out_x_minus := (#x > 0);
+	#x := REAL_TO_INT(ABS(#x * 100));
+	IF #out_iX > 6000 THEN
+	    #out_iX := 6000;
+	ELSE
+	    #out_iX := #x;
+	END_IF;
+	
+	//Смещение по оси Y
+	#a := 2 * #r * SIN(#alpha_rad / 2);
+	#b := #a / (2 * COS(#alpha_rad / 2 - "rPi" / 4));
+	IF #alpha_rad = 0.0 THEN
+	    #c := 0;
+	ELSE
+	    #c := #b / SIN(#alpha_rad);
+	END_IF;
+	IF #alpha_rad < 0 THEN
+	    #k := 2.6;
+	ELSE
+	    #k := 2.44;
+	END_IF;
+	#d := (#x0 + #b + #c - #in_x0_2) * TAN(#alpha_rad) * #k;
+	#y := (#y1 - #d);
+	IF #out_iY > 6000 THEN
+	    #out_iY := 6000;
+	ELSE
+	    #out_iY := REAL_TO_INT(ABS(#y * 100));
+	END_IF;
+	#out_y_minus := (#y > 0);
+	
+ automatically inserted *)
+END_FUNCTION_BLOCK
+
