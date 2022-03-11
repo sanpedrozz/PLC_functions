@@ -1,4 +1,4 @@
-﻿FUNCTION_BLOCK "Shift_Math_Driver_v2"
+FUNCTION_BLOCK "Shift_Math_Driver_v2"
 { S7_Optimized_Access := 'TRUE' }
 VERSION : 0.1
    VAR_INPUT 
@@ -47,8 +47,8 @@ VERSION : 0.1
 
 
 BEGIN
+	REGION Discription
 	(*
-	        
 	         ---+------------------------------------------------------------+ 
 	         ᐱ  |                                                            |
 	         |  |                                                            |
@@ -68,47 +68,41 @@ BEGIN
 	         |  |                                                            | |
 	         ᐯ  |               |                          |                 | ᐯ
 	         ---+---------------|--------------------------|-----------------+--
-	            |<-rYshiftEdge->|<------rYBetweenCam------>|<-rYshiftCorner->|
-	                      
+	            |<-rYshiftEdge->|<------rYBetweenCam------>|<-rYshiftCorner->|              
 	*)
+	END_REGION
 	
-	///////////////////////////////Расчет дополнительных переменных///////////////////////////////
-	#CalcData.rYBetweenCam := #rYLen - #in_rYShiftEdge - #in_rYShiftCorner;
-	#CalcData.rXDelta := ABS(#in_CamEdge.rX - #in_CamCorner.rX);
-	#CalcData.rXCatet := #rXLen/2;
-	#CalcData.rYCatet := #rYLen/2 - #in_rXShiftCorner;
-	//////////////////////////////////////////////////////////////////////////////////////////////
+	REGION Расчет дополнительных переменных
+	    #CalcData.rYBetweenCam := #rYLen - #in_rYShiftEdge - #in_rYShiftCorner;
+	    #CalcData.rXDelta := ABS(#in_CamEdge.rX - #in_CamCorner.rX);
+	    #CalcData.rXCatet := #rXLen / 2;
+	    #CalcData.rYCatet := #rYLen / 2 - #in_rXShiftCorner;
+	END_REGION
 	
+	REGION Расчет смещений
+	    //Расчет смещения угла A
+	    #A.rTangens := #CalcData.rXDelta / #CalcData.rYBetweenCam;  // Calculate Tangens Degree tn(A)
+	    #A.rDegree := ATAN(#A.rTangens);                            // Calculate A in Degree
+	    #A.rRadian := #A.rDegree * "rPi" / 180;                     // Calculate A in Radian
+	    
+	    //Расчет смещения Х
+	    #rX := (#in_CamEdge.rX + #in_CamCorner.rX - TAN(#A.rDegree) * #CalcData.rYCatet) / 2;
+	    
+	    
+	    //#rX := (#in_CamCorner.rX + #in_CamEdge.rX -) / 2;
+	    //Расчет смещения Y
+	    #rY := #in_CamEdge.rY - TAN(#A.rDegree) * #CalcData.rYCatet;
+	END_REGION
 	
-	///////////////////////////////////////Расчет смещений////////////////////////////////////////
-	//Расчет смещения угла A
-	#A.rTangens := #CalcData.rXDelta / #CalcData.rYBetweenCam;  // Calculate Tangens Degree tn(A)
-	#A.rDegree := ATAN(#A.rTangens);                            // Calculate A in Degree
-	#A.rRadian := #A.rDegree * "rPi" / 180;                     // Calculate A in Radian
+	REGION Применение min|max к расчетным значениям
+	    #A.rDegree := LIMIT(MN := 2, IN := #A.rDegree, MX := 2);    // Limit Angle
+	    
+	END_REGION
 	
-	//Расчет смещения Х
-	#rX := (#in_CamEdge.rX + #in_CamCorner.rX -  TAN(#A.rDegree) * #CalcData.rYCatet) / 2;
+	REGION Доп. Преобразование
+	    #A.rDegree := #A.rDegree * 100; // Multiply by 100
+	END_REGION
 	
-	
-	//#rX := (#in_CamCorner.rX + #in_CamEdge.rX -) / 2;
-	//Расчет смещения Y
-	#rY := #in_CamEdge.rY - TAN(#A.rDegree) * #CalcData.rYCatet;
-	//////////////////////////////////////////////////////////////////////////////////////////////
-	
-	///////////////////////////Применение min|max к расчетным значениям///////////////////////////
-	#A.rDegree := LIMIT(MN := 2, IN := #A.rDegree, MX := 2);    // Limit Angle
-	
-	//////////////////////////////////////////////////////////////////////////////////////////////
-	
-	
-	//////////////////////////////////////Доп. Преобразование/////////////////////////////////////
-	#A.rDegree := #A.rDegree * 100;                             // Multiply by 100
-	//////////////////////////////////////////////////////////////////////////////////////////////
-	
-	
-	//////////////////////////////////////Доп. Преобразование/////////////////////////////////////
-	
-	//////////////////////////////////////////////////////////////////////////////////////////////
 	
 	(*
 	//Если нулевые значения координат, то принимать значение 0.01
@@ -152,4 +146,3 @@ BEGIN
 	
  automatically inserted *)
 END_FUNCTION_BLOCK
-
