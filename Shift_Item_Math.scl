@@ -24,25 +24,28 @@ VERSION : 0.1
          rY2 { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
       END_STRUCT;
       CalcData { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Struct
-         rXBetweenCam { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
-         rYBetweenCam { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
-         rXDelta { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
-         rYDelta { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
-         rXCatet { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
-         rYCatet { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rYDistBetweenCam { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
       END_STRUCT;
       A { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Struct
          rTangens { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
          rRadian { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
          rDegree { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rOffset { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
       END_STRUCT;
-      rX { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
-      rY { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
-   END_VAR
-
-   VAR CONSTANT 
-      rXLen : Real := 2070.0;
-      rYLen : Real := 2800.0;
+      X { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Struct
+         rAverage { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rCorrectiveEdge { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rCorrectiveCorner { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rCorrectiveFull { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rCalc { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rOffset { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      END_STRUCT;
+      Y { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Struct
+         rAverage { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rCorrective { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rCalc { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+         rOffset { ExternalAccessible := 'False'; ExternalVisible := 'False'; ExternalWritable := 'False'} : Real;
+      END_STRUCT;
    END_VAR
 
 
@@ -73,76 +76,43 @@ BEGIN
 	END_REGION
 	
 	REGION Расчет дополнительных переменных
-	    #CalcData.rYBetweenCam := #rYLen - #in_rYShiftEdge - #in_rYShiftCorner;
-	    #CalcData.rXDelta := ABS(#in_CamEdge.rX - #in_CamCorner.rX);
-	    #CalcData.rXCatet := #rXLen / 2;
-	    #CalcData.rYCatet := #rYLen / 2 - #in_rXShiftCorner;
+	    #CalcData.rYDistBetweenCam := #in_rYfull - #in_rYShiftEdge - #in_rYShiftCorner;     //Растояние между камерами
 	END_REGION
 	
 	REGION Расчет смещений
-	    //Расчет смещения угла A
-	    #A.rTangens := #CalcData.rXDelta / #CalcData.rYBetweenCam;  // Calculate Tangens Degree tn(A)
-	    #A.rDegree := ATAN(#A.rTangens);                            // Calculate A in Degree
-	    #A.rRadian := #A.rDegree * "rPi" / 180;                     // Calculate A in Radian
-	    
+	    //Расчет смещения угла A (ОК)
+	    #A.rTangens := (#in_CamEdge.rX - #in_CamCorner.rX) / #CalcData.rYDistBetweenCam;    // Calculate Tangens Degree tn(A)
+	    #A.rRadian := ATAN(#A.rTangens);                                                    // Calculate A in Radian
+	    #A.rDegree := #A.rRadian * 180 /"rPi";                                              // Calculate A in Degree
+	
 	    //Расчет смещения Х
-	    #rX := (#in_CamEdge.rX + #in_CamCorner.rX - TAN(#A.rDegree) * #CalcData.rYCatet) / 2;
+	    #X.rAverage := (#in_CamEdge.rX + #in_CamCorner.rX) / 2;                                                                 // Calculation of the Average Offset without rotation
+	    #X.rCorrectiveEdge :=(#in_rYfull / 2 - #in_rYShiftEdge - #in_rXfull / 2 * TAN(#A.rRadian / 2)) * TAN(#A.rRadian);       // Calculation Edge rotation corrective
+	    #X.rCorrectiveCorner :=(#in_rYfull / 2 - #in_rYShiftCorner + #in_rXfull / 2 * TAN(#A.rRadian / 2)) * TAN(#A.rRadian);   // Calculation Corner rotation corrective
+	    #X.rCorrectiveFull := (#X.rCorrectiveEdge - #X.rCorrectiveCorner) / 2;                                                  // Calculation Full rotation corrective
+	    #X.rCalc := #X.rAverage + #X.rCorrectiveFull;                                                                           // Calculation of the Average Offset with rotation
 	    
-	    
-	    //#rX := (#in_CamCorner.rX + #in_CamEdge.rX -) / 2;
 	    //Расчет смещения Y
-	    #rY := #in_CamEdge.rY - TAN(#A.rDegree) * #CalcData.rYCatet;
+	    #Y.rAverage := #in_CamCorner.rY;                                                                                    // Calculation of the Average Offset without rotation
+	    #Y.rCorrective := (#in_rXfull / 2 - #in_rXShiftCorner - #in_rYfull / 2 * TAN(#A.rRadian / 2)) * TAN(#A.rRadian);    // Calculation of the Rotation Offset
+	    #Y.rCalc := #Y.rAverage - #Y.rCorrective;                                                                           // Calculation of the Average Offset with rotation
 	END_REGION
 	
 	REGION Применение min|max к расчетным значениям
-	    #A.rDegree := LIMIT(MN := 2, IN := #A.rDegree, MX := 2);    // Limit Angle
-	    
+	    #A.rOffset := LIMIT(MN := -2, IN := #A.rDegree, MX := 2);    // Limit Angle
+	    #X.rOffset := LIMIT(MN := -70, IN := #X.rCalc, MX := 70);    // Limit Axis X
+	    #Y.rOffset := LIMIT(MN := -70, IN := #Y.rCalc, MX := 70);    // Limit Axis Y
 	END_REGION
 	
 	REGION Доп. Преобразование
-	    #A.rDegree := #A.rDegree * 100; // Multiply by 100
+	    #A.rOffset := #A.rOffset * (-100);  // Multiply by -100
+	    #Y.rOffset := #Y.rOffset * (-1);    // Multiply by -1
 	END_REGION
 	
+	REGION Записываем выход
+	    #out_diX := REAL_TO_DINT(#X.rOffset);
+	    #out_diY := REAL_TO_DINT(#Y.rOffset);
+	    #out_diA := REAL_TO_DINT(#A.rOffset);
+	END_REGION
 	
-	(*
-	//Если нулевые значения координат, то принимать значение 0.01
-	#r := SQRT(SQR(#in_xl) + SQR(#in_yl)) / 2;
-	#p := (#in_yl / 2 - #in_y0_1) / (#in_yl / 2 - #in_y0_2);
-	#x0 := (#x1 * #p + #x2) / 2;
-	
-	#s := SQRT(SQR(#in_xl / 2) + SQR(#in_yl / 2 - #in_y0_2));
-	
-	//Смещениен по X
-	#x := (#x1 - #s * TAN(#alpha_rad * 1.2) + #x2) / 2;
-	#out_x_minus := (#x > 0);
-	#x := REAL_TO_INT(ABS(#x * 100));
-	IF #out_iX > 6000 THEN
-	    #out_iX := 6000;
-	ELSE
-	    #out_iX := #x;
-	END_IF;
-	
-	//Смещение по оси Y
-	#a := 2 * #r * SIN(#alpha_rad / 2);
-	#b := #a / (2 * COS(#alpha_rad / 2 - "rPi" / 4));
-	IF #alpha_rad = 0.0 THEN
-	    #c := 0;
-	ELSE
-	    #c := #b / SIN(#alpha_rad);
-	END_IF;
-	IF #alpha_rad < 0 THEN
-	    #k := 2.6;
-	ELSE
-	    #k := 2.44;
-	END_IF;
-	#d := (#x0 + #b + #c - #in_x0_2) * TAN(#alpha_rad) * #k;
-	#y := (#y1 - #d);
-	IF #out_iY > 6000 THEN
-	    #out_iY := 6000;
-	ELSE
-	    #out_iY := REAL_TO_INT(ABS(#y * 100));
-	END_IF;
-	#out_y_minus := (#y > 0);
-	
- automatically inserted *)
 END_FUNCTION_BLOCK
